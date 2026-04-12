@@ -7,7 +7,7 @@ import scipy.io
 import gzip
 data_dir = "E:\数据集\GSE200996\GSE200996_RAW"
 def parse_sample_info_from_dirname(dirname):
-    info = {
+    info = {      #标签类型,要包括以下几个，记得标准化命名
         "sample_id": "unknown",
         "patient": "unknown",
         "tissue": "unknown",
@@ -15,10 +15,13 @@ def parse_sample_info_from_dirname(dirname):
         "cancer_type": "HNSCC",
         "treatment_drug": "Nivolumab or Nivolumab & Ipilimumab",
         "treatment_timepoint": "none",
+        "cell_sorting": "none",
     }
     parts = dirname.split("_")
+    #提取样本ID，通常是以GSM开头的部分
     gsm_id = parts[0] if parts[0].startswith("GSM") else "unknown"
     info["sample_id"] = gsm_id
+    #提取组织来源和疾病状态
     tissue_keywords = ["PBMC", "tumor"]
     for keyword in tissue_keywords:
         if keyword in dirname:
@@ -26,17 +29,24 @@ def parse_sample_info_from_dirname(dirname):
             break
     simplified = re.sub(r'^GSM\d+_raw_feature_bc_matrix_', '', dirname)
     simplified = re.sub(r'^GSM\d+_', '', simplified) if simplified == dirname else simplified
+    #提取患者编号，假设格式为P1, P2等，或者P1-P2等
     patient_match = re.match(r'((?:P\d+)(?:-P\d+)*)', simplified)
     if patient_match:
         info["patient"] = patient_match.group(1)
     tx_match = re.search(r'(pre-Tx|post-Tx|pre_Tx|post_Tx|preTx|postTx)', simplified, re.IGNORECASE)
+    #提取治疗时间点，假设包含pre-Tx或post-Tx等关键词
     if tx_match:
         raw_tx = tx_match.group(1).lower()
         if "pre" in raw_tx:
             info["treatment_timepoint"] = "pre-treatment"
         elif "post" in raw_tx:
             info["treatment_timepoint"] = "post-treatment"
+    #提取细胞分选信息
+    sort_match = re.search(r'sorted_(.+?)_(PBMC|tumor|normal|Tumor|TUMOR|Normal)', simplified, re.IGNORECASE)
+    if sort_match:
+        info["cell_sorting"] = sort_match.group(1)
     return info
+#读取h5文件的函数
 def find_h5_files(data_dir):
     all_files = os.listdir(data_dir)
     h5_pattern = re.compile(r'^(GSM\d+_.+?)\.h5$')
@@ -53,6 +63,7 @@ def read_h5_file(file_path, file_type=None):
 sample_files = find_h5_files(data_dir)
 adatas = []
 metadata_records = []
+#按照样本ID排序处理文件
 for prefix, files in sorted(sample_files.items()):
     adata = read_h5_file(files)
     adata.var_names_make_unique()
@@ -77,7 +88,6 @@ for prefix, files in sorted(sample_files.items()):
 common_genes = adatas[0].var_names
 for ad in adatas[1:]:
     common_genes = common_genes.intersection(ad.var_names)
-print(f"\n公共基因数量: {len(common_genes)}")
 # 对每个adata只保留公共基因，并确保顺序一致
 for i in range(len(adatas)):
     adatas[i] = adatas[i][:, common_genes].copy()
@@ -87,10 +97,13 @@ if all("gene_ids" in ad.var.columns for ad in adatas):
 for i in range(len(adatas)):
     keep_cols = [c for c in var_cols_to_keep if c in adatas[i].var.columns]
     adatas[i].var = adatas[i].var[keep_cols].copy()
+#保存文件
 metadata_df = pd.DataFrame(metadata_records)
 metadata_path = r"C:\Users\49625\Desktop\大创相关\code\data\GSE200996_HNSCC\GSE200996_sample_metadata.csv"
 os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
 metadata_df.to_csv(metadata_path, index=False)
+print(f"\n样本元数据汇总表已保存至: {metadata_path}")
+#合并数据
 adata_combined = sc.concat(adatas, join="inner", merge="same", index_unique="-")
 adata_combined.var_names_make_unique()
 del adatas
@@ -106,6 +119,7 @@ sc.pp.filter_genes(adata_combined, min_cells=3)
 output_dir = "C:\\Users\\49625\\Desktop\\大创相关\\code\\data\\GSE200996_HNSCC\\filtered_h5ad"
 os.makedirs(output_dir, exist_ok=True)
 unique_sample_ids = metadata_df["sample_id"].unique()
+#输出质控后每个样本的h5ad文件
 sample_summary = []
 for sample_id in unique_sample_ids:
     if sample_id == "unknown" or pd.isna(sample_id):
