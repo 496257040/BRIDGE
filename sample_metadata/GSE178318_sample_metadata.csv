@@ -1,0 +1,15 @@
+sample_id,cell_count,patient,tissue,disease,cancer_type,treatment_drug,treatment_timepoint,cell_sorting
+GSM5387660,17000,COL07,tumor,CRC,CRC,none or capecitabine & oxaliplatin or 5FU & oxaliplatin & leucovorin & bevacizumab,none,none
+GSM5387661,16100,COL07,LM,CRC,CRC,none or capecitabine & oxaliplatin or 5FU & oxaliplatin & leucovorin & bevacizumab,none,none
+GSM5387662,10750,COL12,tumor,CRC,CRC,none or capecitabine & oxaliplatin or 5FU & oxaliplatin & leucovorin & bevacizumab,none,none
+GSM5387663,3160,COL12,LM,CRC,CRC,none or capecitabine & oxaliplatin or 5FU & oxaliplatin & leucovorin & bevacizumab,none,none
+GSM5387664,12400,COL12,PBMC,CRC,CRC,none or capecitabine & oxaliplatin or 5FU & oxaliplatin & leucovorin & bevacizumab,none,none
+GSM5387665,4250,COL15,tumor,CRC,CRC,capecitabine & oxaliplatin,post-treatment,none
+GSM5387666,9700,COL15,LM,CRC,CRC,capecitabine & oxaliplatin,post-treatment,none
+GSM5387667,6000,COL16,tumor,CRC,CRC,none or capecitabine & oxaliplatin or 5FU & oxaliplatin & leucovorin & bevacizumab,none,none
+GSM5387668,8200,COL16,LM,CRC,CRC,none or capecitabine & oxaliplatin or 5FU & oxaliplatin & leucovorin & bevacizumab,none,none
+GSM5387669,9035,COL17,tumor,CRC,CRC,capecitabine & oxaliplatin,post-treatment,none
+GSM5387670,10000,COL17,LM,CRC,CRC,capecitabine & oxaliplatin,post-treatment,none
+GSM5387671,6700,COL17,PBMC,CRC,CRC,capecitabine & oxaliplatin,post-treatment,none
+GSM5387672,8700,COL18,tumor,CRC,CRC,5FU & oxaliplatin & leucovorin & bevacizumab,post-treatment,none
+GSM5387673,10386,COL18,LM,CRC,CRC,5FU & oxaliplatin & leucovorin & bevacizumab,post-treatment,none

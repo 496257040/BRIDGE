@@ -1,0 +1,17 @@
+sample_id,cell_count,patient,tissue,disease,cancer_type,treatment_drug,treatment_timepoint,cell_sorting
+GSM4047944,4789,4095,tumor,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047945,4265,4095,tumor,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047946,4573,4095,tumor,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047947,4255,4095,tumor,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047948,2504,4007,tumor,CRC,CRC,unknown,post-treatment,none
+GSM4047949,3574,4069,tumor,CRC,CRC,unknown,post-treatment,none
+GSM4047950,3099,4071,tumor,CRC,CRC,unknown,post-treatment,none
+GSM4047951,3519,4081,tumor,CRC,CRC,unknown,post-treatment,none
+GSM4047952,5455,4095,PBMC,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047953,5798,4095,PBMC,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047954,5959,4095,PBMC,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047955,7006,4095,PBMC,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047956,5359,4095,PBMC,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047957,5456,4095,PBMC,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047958,3728,4095,PBMC,CRC,CRC,TIL therapy,pre-treatment,none
+GSM4047959,3278,4095,PBMC,CRC,CRC,TIL therapy,pre-treatment,none
