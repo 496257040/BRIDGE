@@ -11,18 +11,142 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+# ======================生成标签==========================
+def parse_sample_info_from_dirname(dirname):
+    info = {  # 标签类型,要包括以下几个，记得标准化命名
+        "sample_id": "unknown",
+        "patient": "unknown",
+        "tissue": "unknown",
+        "disease": "CRC",
+        "cancer_type": "CRC",
+        "treatment_drug": "none",
+        "treatment_timepoint": "none",
+        "cell_sorting": "none",
+    }
+    parts = dirname.split("_")
+    # 提取样本ID，通常是以GSM开头的部分
+    gsm_id = parts[0] if parts[0].startswith("GSM") else "unknown"
+    info["sample_id"] = gsm_id
+    # 提取组织来源和疾病状态
+    tissue_keywords = ["PBMC", "tumor", "LM", "normal"]
+    for keyword in tissue_keywords:
+        if keyword in dirname:
+            info["tissue"] = keyword
+            break
+    disease_keywords = ["NSCLC", "NET", "UCEC", "CRC", "RCC"]
+    for keyword in disease_keywords:
+        if keyword in dirname:
+            info["disease"] = keyword
+            info["cancer_type"] = keyword
+            break
+    simplified = re.sub(r'^GSM\d+_raw_feature_bc_matrix_', '', dirname)
+    simplified = re.sub(r'^GSM\d+_', '', simplified) if simplified == dirname else simplified
+    # 提取患者编号，假设格式为P1, P2等，或者P1-P2等
+    # 提取一个或多个以短横线连接的完整患者编号（如 COL07 或 COL07-COL12）
+    patient_match = re.search(r'((?:Lung\d+)|(?:Endo\d+)|(?:Colon\d+)|(?:Renal\d+)*)', simplified)
+    if patient_match:
+        info['patient'] = patient_match.group(1)  # 直接获取完整编号
+
+    print(info)
+    return info
+
+
+# ===========================生成gsm样本的详细信息，供标准化标签使用==========================
+# 从GEO系列矩阵文件中提取特定GSM样本的详细信息
+def extract_sample_info(series_matrix_file, target_gsm):
+    desired_attributes = ["Sample_geo_accession", "Sample_characteristics_region", "Sample_characteristics_patient",
+                          "Sample_characteristics_phenotype"]
+
+    # 读取文件
+    with open(series_matrix_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    # 解析文件内容
+    sample_data = {}
+    current_attribute = None
+    gsm_columns = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        parts = line.split('\t')
+
+        if line.startswith('!'):
+            attr_name = line[1:].split('\t')[0] if '\t' in line else line[1:]
+
+            if attr_name.lower() in ['sample_geo_accession']:
+                gsm_columns = parts[1:]
+
+            current_attribute = attr_name
+
+        if current_attribute and len(parts) > 1:
+            if current_attribute not in sample_data:
+                sample_data[current_attribute] = {}
+
+            for i, gsm in enumerate(gsm_columns):
+                if i + 1 < len(parts):
+                    sample_data[current_attribute][gsm] = parts[i + 1]
+
+    # 提取目标GSM样本的指定属性信息
+    if target_gsm in gsm_columns and sample_data:
+        print(f"\n{'=' * 60}")
+        print(f"样本 {target_gsm} 的指定属性信息:")
+        print('=' * 60)
+
+        result = {}
+        for attr, samples_dict in sample_data.items():
+            # 只提取我们感兴趣的属性
+            if attr in desired_attributes and target_gsm in samples_dict:
+                value = sample_data[attr][target_gsm]
+                if value == '"region: Tumor"':
+                    result[attr] = "tumor"
+                elif value == '"phenotype: Lung adenocarcinoma"':
+                    result[attr] = "NSCLC"
+                elif value == '"region: Normal adjacent tissue"':
+                    result[attr] = "normal"
+                elif value == '"phenotype: Lung squamous cell carcinoma, nonkeratinizing"':
+                    result[attr] = "NSCLC"
+                elif value == '"phenotype: Lung squamous cell carcinoma, keratinizing"':
+                    result[attr] = "NSCLC"
+                elif value == '"phenotype: Large cell neuroendocrine carcinoma"':
+                    result[attr] = "NET"
+                elif value == '"region: Blood"':
+                    result[attr] = "PBMC"
+                elif value == '"phenotype: Endometrial adenocarcinoma"':
+                    result[attr] = "UCEC"
+                elif value == '"phenotype: Colorectal adenocarcinoma"':
+                    result[attr] = "CRC"
+                elif value == '"phenotype: Renal cell carcinoma, clear cell"':
+                    result[attr] = "RCC"
+                else:
+                    result[attr] = value
+        # 保存结果到字符串
+        if result:
+            # 将结果字典的所有值用下划线连接成字符串
+            result_str = "_".join(str(value) for value in result.values() if value)
+            result_clean = result_str.replace('"', '').replace('patient: ', '')
+            print(f"信息已转换为字符串: {result_clean}")
+            return result_clean
+
+
 class SingleCellAnalyzer:
-    def __init__(self, tar_file, series_matrix_file):
+    def __init__(self, tar_file, sample_info_list):
         """
         初始化单细胞分析器
 
         参数:
         tar_file: 原始数据tar文件路径
-        series_matrix_file: 系列矩阵文件路径
+        sample_info_list: 样本信息字典列表
         """
         self.tar_file = tar_file
-        self.series_matrix_file = series_matrix_file
+        self.sample_info_list = sample_info_list
         self.gsm_output_dir = "gsm_samples"  # 只输出这个文件夹
+
+        # 初始化细胞计数字典
+        self.cell_counts = {}  # 记录每个样本的细胞数量
+        self.original_cell_counts = {}  # 记录原始细胞数量
 
         # 只创建gsm_samples文件夹
         os.makedirs(self.gsm_output_dir, exist_ok=True)
@@ -32,83 +156,100 @@ class SingleCellAnalyzer:
         self.adata_dict = {}
         self.gsm_files = {}
 
-    def parse_series_matrix(self):
+    def parse_sample_info(self):
         """
-        解析GSE139555_series_matrix.txt文件，提取GSM4143655~GSM4143686的信息
+        从提供的样本信息列表中解析元数据
         """
-        print("解析系列矩阵文件...")
+        print("解析样本信息列表...")
 
-        with open(self.series_matrix_file, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
-
-        # 目标GSM样本范围
-        target_gsm = [f"GSM41436{i:02d}" for i in range(55, 87)]
-
-        # 初始化数据结构
-        sample_data = {}
-        current_key = None
-
-        for line in lines:
-            line = line.strip()
-            if not line:
+        for sample_info in self.sample_info_list:
+            gsm_id = sample_info.get('sample_id')
+            if not gsm_id:
+                print(f"警告: 样本信息中没有'sample_id'键: {sample_info}")
                 continue
 
-            # 处理键值对
-            if line.startswith('!'):
-                if '"' in line:
-                    # 格式: !Sample_key = "value1" "value2" ...
-                    parts = line.split('=', 1)
-                    if len(parts) == 2:
-                        key = parts[0].strip()
-                        values = re.findall(r'"([^"]*)"', parts[1].strip())
+            # 映射字段到内部格式
+            self.metadata[gsm_id] = {
+                'gsm_id': gsm_id,
+                'patient_id': sample_info.get('patient', 'unknown'),
+                'tissue_type': sample_info.get('tissue', 'unknown'),
+                'disease_type': sample_info.get('disease', 'unknown'),
+                'cancer_type': sample_info.get('cancer_type', 'unknown'),
+                'sample_source': sample_info.get('tissue', 'unknown'),  # 使用tissue作为样本来源
+                'treatment': sample_info.get('treatment_drug', 'none'),
+                'timepoint': sample_info.get('treatment_timepoint', 'none'),
+                'cell_sorting': sample_info.get('cell_sorting', 'none'),
+                'original_info': sample_info  # 保存原始信息以备后用
+            }
 
-                        if key == '!Sample_geo_accession':
-                            # 这是GSM编号列表
-                            for i, gsm_id in enumerate(values):
-                                if gsm_id in target_gsm:
-                                    if gsm_id not in sample_data:
-                                        sample_data[gsm_id] = {
-                                            'gsm_id': gsm_id,
-                                            'patient_id': 'unknown',
-                                            'tissue_type': 'unknown',
-                                            'disease_type': 'unknown',
-                                            'sample_source': 'unknown',
-                                            'treatment': 'unknown',
-                                            'timepoint': 'unknown'
-                                        }
-                        else:
-                            # 其他属性
-                            for i, value in enumerate(values):
-                                gsm_id = None
-                                if '!Sample_geo_accession' in sample_data:
-                                    # 需要先找到对应的GSM编号
-                                    pass
+        print(f"成功解析 {len(self.metadata)} 个样本的元数据")
 
-        # 由于您的文件格式特殊，可能需要手动添加元数据
-        # 根据GSE139555的描述，这些样本是结直肠癌样本
-        for gsm_id in target_gsm:
-            if gsm_id not in sample_data:
-                # 创建样本信息
-                sample_data[gsm_id] = {
-                    'gsm_id': gsm_id,
-                    'patient_id': f"Patient_{int(gsm_id[9:]) - 3654}",  # 简单计算患者编号
-                    'tissue_type': 'colorectal',  # 结直肠组织
-                    'disease_type': 'colorectal cancer',  # 结直肠癌
-                    'sample_source': 'tumor',  # 肿瘤组织
-                    'treatment': 'naive',  # 未治疗
-                    'timepoint': 'baseline'  # 基线
-                }
+        # 打印样本信息摘要
+        print("\n样本信息摘要:")
+        for gsm_id, info in self.metadata.items():
+            print(f"  {gsm_id}: {info['patient_id']}, {info['tissue_type']}, {info['disease_type']}")
 
-        self.metadata = sample_data
-        print(f"成功解析 {len(self.metadata)} 个目标GSM样本的元数据")
         return self.metadata
+
+    def generate_sample_summary_table(self):
+        """生成样本摘要表格，类似于图片中的格式"""
+
+        summary_data = []
+
+        for gsm_id, metadata in self.metadata.items():
+            # 获取细胞数量 - 从cell_counts字典中获取
+            cell_count = self.cell_counts.get(gsm_id, 0)
+
+            # 从metadata中获取其他信息
+            patient = metadata.get('patient_id', 'unknown')
+            tissue = metadata.get('tissue_type', 'unknown')
+            disease = metadata.get('disease_type', 'unknown')
+            cancer_type = metadata.get('cancer_type', 'unknown')
+            treatment_drug = metadata.get('treatment', 'unknown')
+            treatment_timepoint = metadata.get('timepoint', 'unknown')
+            cell_sorting = metadata.get('cell_sorting', 'unknown')
+
+            # 添加到摘要数据
+            summary_data.append({
+                'sample_id': gsm_id,
+                'cell_count': cell_count,
+                'patient': patient,
+                'tissue': tissue,
+                'disease': disease,
+                'cancer_type': cancer_type,
+                'treatment_drug': treatment_drug,
+                'treatment_timepoint': treatment_timepoint,
+                'cell_sorting': cell_sorting
+            })
+
+        # 创建DataFrame
+        summary_df = pd.DataFrame(summary_data)
+
+        # 按sample_id排序
+        summary_df = summary_df.sort_values('sample_id')
+
+        # 保存为CSV文件
+        output_file = os.path.join(self.gsm_output_dir, "sample_summary.csv")
+        summary_df.to_csv(output_file, index=False)
+
+        # 打印表格摘要
+        print("\n" + "=" * 100)
+        print("样本摘要表格已生成:")
+        print("=" * 100)
+        print(summary_df.to_string(index=False))
+        print("=" * 100)
+        print(f"\n表格已保存到:")
+        print(f"  CSV格式: {output_file}")
+
+        return summary_df
 
     def extract_and_organize_tar_files(self):
         """解压tar文件并组织GSM样本文件"""
         print("解压tar文件并组织GSM样本...")
 
-        # 目标GSM样本范围
-        target_gsm = [f"GSM41436{i:02d}" for i in range(55, 87)]
+        # 目标GSM样本从元数据中获取
+        target_gsm = list(self.metadata.keys())
+        print(f"目标GSM样本: {target_gsm}")
 
         # 直接从tar文件中查找，不先解压到磁盘
         with tarfile.open(self.tar_file, 'r') as tar:
@@ -134,10 +275,22 @@ class SingleCellAnalyzer:
                     }
                 else:
                     self.gsm_files[gsm_id] = {'matrix': None, 'barcodes': None, 'genes': None}
+                    print(f"警告: 未找到GSM样本 {gsm_id} 的文件")
 
         # 统计
         complete_samples = len([k for k, v in self.gsm_files.items() if all(v.values())])
-        print(f"共找到 {complete_samples} 个完整的GSM样本文件")
+        incomplete_samples = len([k for k, v in self.gsm_files.items() if not all(v.values())])
+
+        print(f"完整样本: {complete_samples} 个")
+        print(f"不完整样本: {incomplete_samples} 个")
+
+        if incomplete_samples > 0:
+            print("不完整的样本:")
+            for gsm_id, files in self.gsm_files.items():
+                if not all(files.values()):
+                    missing_files = [k for k, v in files.items() if v is None]
+                    print(f"  {gsm_id}: 缺少 {missing_files}")
+
         return self.gsm_files
 
     def process_gsm_sample(self, gsm_id, tar):
@@ -193,22 +346,36 @@ class SingleCellAnalyzer:
                 cache=False
             )
 
+            # 记录原始细胞数量
+            self.original_cell_counts[gsm_id] = adata.shape[0]
+            print(f"  {gsm_id}: 读取 {adata.shape[0]} 细胞, {adata.shape[1]} 基因")
+
             # 添加GSM ID到细胞barcode
             adata.obs_names = [f"{gsm_id}_{barcode}" for barcode in adata.obs_names]
             adata.obs['gsm_id'] = gsm_id
 
-            # 添加元数据标签
+            # 添加元数据标签 - 使用提供的字典信息
             if gsm_id in self.metadata:
                 meta = self.metadata[gsm_id]
+
+                # 添加所有元数据字段
                 for key, value in meta.items():
-                    adata.obs[key] = value
+                    if key != 'original_info':  # 不添加原始信息字典
+                        adata.obs[key] = value
+
+                # 打印添加的元数据
+                print(
+                    f"  {gsm_id}: 添加元数据 - 病人: {meta.get('patient_id')}, 组织: {meta.get('tissue_type')}, 疾病: {meta.get('disease_type')}")
             else:
+                print(f"  警告: 没有找到 {gsm_id} 的元数据")
                 # 如果没有元数据，添加默认值
                 adata.obs['patient_id'] = gsm_id
                 adata.obs['tissue_type'] = 'unknown'
                 adata.obs['disease_type'] = 'unknown'
-
-            print(f"  {gsm_id}: 读取 {adata.shape[0]} 细胞, {adata.shape[1]} 基因")
+                adata.obs['cancer_type'] = 'unknown'
+                adata.obs['treatment'] = 'none'
+                adata.obs['timepoint'] = 'none'
+                adata.obs['cell_sorting'] = 'none'
 
             # 清理临时目录
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -217,6 +384,8 @@ class SingleCellAnalyzer:
 
         except Exception as e:
             print(f"  处理样本 {gsm_id} 时出错: {e}")
+            import traceback
+            traceback.print_exc()
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
 
@@ -250,7 +419,7 @@ class SingleCellAnalyzer:
         return adata_combined
 
     def save_gsm_samples(self, adata_combined):
-        """按GSM样本分割并保存为h5ad文件"""
+        """按GSM样本分割并保存为h5ad文件，并记录质控后的细胞数量"""
         print("按GSM样本分割并保存...")
 
         for gsm_id in sorted(adata_combined.obs['gsm_id'].unique()):
@@ -259,12 +428,27 @@ class SingleCellAnalyzer:
             adata_gsm = adata_combined[gsm_mask, :].copy()
 
             if adata_gsm.shape[0] > 0:
+                # 记录质控后的细胞数量
+                self.cell_counts[gsm_id] = adata_gsm.shape[0]
+
                 # 保存为h5ad文件
                 output_file = os.path.join(self.gsm_output_dir, f"{gsm_id}_filtered.h5ad")
                 adata_gsm.write(output_file)
 
-                print(f"  已保存: {gsm_id} ({adata_gsm.shape[0]} 细胞) -> {output_file}")
+                # 获取原始细胞数量
+                original_cells = self.original_cell_counts.get(gsm_id, 0)
+                remaining_percent = (adata_gsm.shape[0] / original_cells * 100) if original_cells > 0 else 0
+
+                # 添加统计信息
+                if gsm_id in self.metadata:
+                    meta = self.metadata[gsm_id]
+                    print(
+                        f"  已保存: {gsm_id} ({adata_gsm.shape[0]} 细胞, 原始{original_cells}, 保留{remaining_percent:.1f}%) - {meta.get('patient_id')}, {meta.get('tissue_type')}, {meta.get('disease_type')}")
+                else:
+                    print(
+                        f"  已保存: {gsm_id} ({adata_gsm.shape[0]} 细胞, 原始{original_cells}, 保留{remaining_percent:.1f}%)")
             else:
+                self.cell_counts[gsm_id] = 0
                 print(f"  警告: {gsm_id} 在质控后没有细胞")
 
     def run_analysis(self):
@@ -273,12 +457,13 @@ class SingleCellAnalyzer:
         print("开始单细胞分析流程")
         print("=" * 60)
 
-        # 步骤1: 解析系列矩阵文件
-        print("\n1. 解析系列矩阵文件...")
-        self.parse_series_matrix()
+        # 步骤1: 解析样本信息列表
+        print("\n1. 解析样本信息列表...")
+        self.parse_sample_info()
 
         if not self.metadata:
-            print("警告: 未解析到元数据，将继续处理但可能无法添加正确的标签")
+            print("错误: 未解析到样本元数据，无法继续处理")
+            return
 
         # 步骤2: 从tar文件中组织GSM样本文件
         print("\n2. 从tar文件中组织GSM样本文件...")
@@ -324,32 +509,34 @@ class SingleCellAnalyzer:
         print("\n6. 按GSM保存样本...")
         self.save_gsm_samples(adata_qc)
 
+        # 步骤7: 生成样本摘要表格
+        print("\n7. 生成样本摘要表格...")
+        self.generate_sample_summary_table()
+
         print("\n" + "=" * 60)
         print("分析完成!")
         print("=" * 60)
         print(f"输出目录: {self.gsm_output_dir}")
-        print(f"文件数量: {len(os.listdir(self.gsm_output_dir))}")
+        if os.path.exists(self.gsm_output_dir):
+            print(f"文件数量: {len([f for f in os.listdir(self.gsm_output_dir) if f.endswith('.h5ad')])}")
         print("=" * 60)
 
+        return adata_qc
 
-# 主程序
+
 if __name__ == "__main__":
-    # 设置文件路径
-    tar_file = "GSE139555_RAW.tar"
+    # 文件路径
     series_matrix_file = "GSE139555_series_matrix.txt"
-
-    # 检查文件是否存在
-    if not os.path.exists(tar_file):
-        print(f"错误: 找不到tar文件 {tar_file}")
-        print("请确保文件在当前目录")
-    elif not os.path.exists(series_matrix_file):
-        print(f"错误: 找不到系列矩阵文件 {series_matrix_file}")
-        print("请确保文件在当前目录")
-    else:
-        # 创建分析器并运行
-        analyzer = SingleCellAnalyzer(
-            tar_file=tar_file,
-            series_matrix_file=series_matrix_file
-        )
-
-        analyzer.run_analysis()
+    input_dir = r'C:\Users\14584\Desktop\数据贴标签 - 0407\GSE139555'
+    # 1. 使用提供的样本信息字典
+    sample_info_list1 = []
+    for a in range(4143655, 4143687):
+        target_gsm = '"' + "GSM" + str(a) + '"'  # 替换为您要查找的GSM编号
+        filename = extract_sample_info(series_matrix_file, target_gsm)
+        output_info = parse_sample_info_from_dirname(filename)
+        sample_info_list1.append(output_info)
+    analyzer = SingleCellAnalyzer(
+        tar_file="GSE139555_RAW.tar",  # 你的tar文件路径
+        sample_info_list=sample_info_list1
+    )
+    analyzer.run_analysis()
