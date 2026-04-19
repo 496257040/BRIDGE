@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import os
 import re
 import harmonypy
+np.random.seed(114514)
 qc_dir = r"E:\数据集\filtered_h5ad\CRC1合并"
 adatas = []
 # 定义列名映射
@@ -139,8 +140,8 @@ marker_genes = {
 cell_type_annotation = {
     "0": "CD8+ T", "1": "CD8+ T", "2": "T cells", "3": "CD4+T",
     "4": "Monocytes", "5": "NK cells", "6": "???", "7": "Treg",
-    "8": "CRC tumor cells", "9": "B cells", "10": "CD8+ T", "11": "Plasma cells",
-    "12": "CD8+ T", "13": "Fibroblasts", "14": "?????", "15": "pDC",
+    "8": "CRC tumor cells", "9": "B cells", "10": "Cycling T cells", "11": "Plasma cells",
+    "12": "CTL", "13": "Fibroblasts", "14": "?????", "15": "T cells (ambiguous)", "16": "pDC", 
 }
 marker_list = [gene for genes in marker_genes.values() for gene in genes]
 marker_list_filtered = [g for g in marker_list if g in adata.var_names]  
